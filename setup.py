@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name='aiosterisk',
-    version='0.0.1',
+    version='0.0.2',
     packages=['aiosterisk'],
     url='https://github.com/asterisk/starpy',
     license='',
