@@ -14,6 +14,7 @@ class AMIProtocol(asyncio.Protocol):
     def __init__(self, username, secret, instance_id=None, plaintext_login=True, loop=None):
         self.action_futures = {}
         self.event_handlers = {}
+        self.tasks = []
 
         self.transport = None
         self.hostname = None
@@ -26,7 +27,8 @@ class AMIProtocol(asyncio.Protocol):
 
         self.loop = loop or asyncio.get_event_loop()
         self.message_queue = asyncio.Queue(loop=self.loop)
-        self.loop.create_task(self._dispatch_message())
+        self.tasks.append(
+            self.loop.create_task(self._dispatch_message()))
 
     def connection_made(self, transport):
         log.info('Connection made to {0}:{1:d}'.format(*transport.get_extra_info('peername')))
@@ -34,9 +36,20 @@ class AMIProtocol(asyncio.Protocol):
         self.hostname = '{0}:{1:d}'.format(*transport.get_extra_info('sockname'))
         self.loop.create_task(self.login())
 
+    def connection_lost(self, exc):
+        if exc is not None:
+            log.warn('Connection lost: {:r}'.format(exc))
+
     def data_received(self, data):
         # log.debug('Data received: {!r}'.format(data))
         self.message_queue.put_nowait(data.decode())
+
+    def close(self):
+        for task in self.tasks:
+            task.cancel()
+        for future in self.action_futures.values():
+            future.cancel()
+        self.transport.close()
 
     def _dispatch_message(self):
         message = {}
@@ -46,11 +59,9 @@ class AMIProtocol(asyncio.Protocol):
                 line = yield from self.message_queue.get()
                 for tag in line.splitlines():
                     if tag:
-                        matches = re.match('^(\w+): (.+)$', tag)
+                        matches = re.match('^(\S+):\s*(.+)?$', tag)
                         if matches:  # it's a tag: value
                             message.update((matches.groups(),))
-                        elif tag.startswith('Asterisk Call Manager') or tag == '--END COMMAND--':
-                            pass
                         else:  # it's a command output or other plain text
                             message.setdefault('_', []).append(tag)
                     else:  # message ends
@@ -63,12 +74,12 @@ class AMIProtocol(asyncio.Protocol):
                                         future.set_exception(AMICommandFailure(message))
                                     else:
                                         future.set_result(message)
-                                    del self.action_futures[message['ActionID']]
+                                    # del self.action_futures[message['ActionID']]
                             if 'Event' in message:
                                 log.debug('Incoming event: {!r}'.format(message))
                                 for event in self.event_handlers.get(message['Event'], []):
                                     self.loop.call_soon(event, message)
-                            message.clear()  # prepare for the next message
+                            message = {}  # prepare for the next message
         except asyncio.CancelledError:
             pass
 
@@ -78,25 +89,24 @@ class AMIProtocol(asyncio.Protocol):
 
     def _loginPlainText(self):
         return self.sendMessage({
-            'action': 'login',
-            'username': self.username,
-            'secret': self.secret
+            'Action': 'Login',
+            'Username': self.username,
+            'Secret': self.secret
         })
 
     def _loginChallengeResponse(self):
         challenge = yield from self.sendMessage({
-            'action': 'Challenge',
-            'authtype': 'MD5'
+            'Action': 'Challenge',
+            'AuthType': 'MD5'
         })
-        log.info(challenge)
         # if 'challenge' not in challenge:
         # raise
-        key = md5('{0}{1}'.format(challenge['challenge'], self.secret).encode()).hexdigest()
+        key = md5('{0}{1}'.format(challenge['Challenge'], self.secret).encode()).hexdigest()
         return self.sendMessage({
-            'action': 'Login',
-            'authtype': 'MD5',
-            'username': self.username,
-            'key': key
+            'Action': 'Login',
+            'AuthType': 'MD5',
+            'Username': self.username,
+            'Key': key
         })
 
     def sendMessage(self, message):
