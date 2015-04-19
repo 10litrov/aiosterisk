@@ -1,6 +1,6 @@
 import asyncio
 
-from .common import is_ami_action
+from .common import is_ami_action, AMICommandFailure
 from .protocol import AMIProtocol
 
 
@@ -42,3 +42,10 @@ class AMIConnection():
 
     def close(self):
         self.protocol.close()
+
+    def ping(self, timeout=3.0):
+        try:
+            yield from asyncio.wait_for(self.protocol.ping(), timeout, loop=self.loop)
+        except asyncio.TimeoutError or AMICommandFailure:
+            self.close()
+            yield from self.connect()

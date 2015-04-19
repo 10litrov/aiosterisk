@@ -31,7 +31,7 @@ class AMIProtocol(asyncio.Protocol):
 
     def connection_lost(self, exc):
         if exc is not None:
-            log.warn('Connection lost: {:r}'.format(exc))
+            log.warn('Connection lost: {}'.format(exc))
 
     def data_received(self, data):
         self._message_queue.put_nowait(data.decode())
@@ -63,7 +63,7 @@ class AMIProtocol(asyncio.Protocol):
                                 future = self._action_futures.get(message['ActionID'])
                                 if future:
                                     if message.get('Response') == 'Error':
-                                        future.set_exception(AMICommandFailure(message))
+                                        future.set_exception(AMICommandFailure(message.get('Message')))
                                     else:
                                         future.set_result(message)
                                     # del self.action_futures[message['ActionID']]
@@ -91,14 +91,15 @@ class AMIProtocol(asyncio.Protocol):
         else:
             data = message
 
+        future = asyncio.Future(loop=self.loop)
         actionid = self._generateActionId()
+        self._action_futures[actionid] = future
+
         self.transport.write('ActionID: {:s}\n'.format(actionid).encode())
         for key, value in filter(lambda item: item[0].lower() != 'actionid', data):
             self.transport.write('{0:s}: {1:s}\n'.format(key.lower(), value).encode())
         self.transport.write('\n'.encode())
 
-        future = asyncio.Future(loop=self.loop)
-        self._action_futures[actionid] = future
         return future
 
     def on(self, event, callback):
