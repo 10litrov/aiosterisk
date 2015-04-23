@@ -25,6 +25,8 @@ class AMIConnection():
         self.secret = secret
         self.plaintext_login = plaintext_login
 
+        self.closed = True
+
         self.loop = loop or asyncio.get_event_loop()
         self.protocol = AMIProtocol(loop=self.loop)
 
@@ -39,8 +41,10 @@ class AMIConnection():
     def connect(self):
         yield from self.loop.create_connection(lambda: self.protocol, host=self.host, port=self.port)
         yield from self.protocol.login(self.username, self.secret, self.plaintext_login)
+        self.closed = False
 
     def close(self):
+        self.closed = True
         self.protocol.close()
 
     def ping(self, timeout=3.0):
