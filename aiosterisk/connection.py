@@ -47,9 +47,15 @@ class AMIConnection():
         self.closed = True
         self.protocol.close()
 
-    def ping(self, timeout=3.0):
+    def ping(self, timeout=3.0, reconnect=True):
         try:
             yield from asyncio.wait_for(self.protocol.ping(), timeout, loop=self.loop)
         except asyncio.TimeoutError or AMICommandFailure:
-            self.close()
-            yield from self.connect()
+            self.closed = True
+            if reconnect:
+                yield from self.connect()
+            else:
+                raise
+
+    def add_handler(self, event, callback):
+        self.protocol.on(event, callback)
